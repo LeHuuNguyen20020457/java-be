@@ -20,9 +20,10 @@ import java.util.function.Function;
 public class JwtService {
 
 
-    private static final String SECRET_KEY = "0u32CCi2KC6Gl7YcxVkpMb667K8uzpfh";
+    private static final String SECRET_KEY = "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970";
     private long jwtExpiration = 86400000;
 
+    private long refreshExpiration = 86400000*7;
 
 
     public String generateToken(UserDetails userDetails) {
@@ -34,6 +35,12 @@ public class JwtService {
             UserDetails userDetails
     ) {
         return buildToken(extraClaims, userDetails, jwtExpiration);
+    }
+
+    public String generateRefreshToken(
+            UserDetails userDetails
+    ) {
+        return buildToken(new HashMap<>(), userDetails, refreshExpiration);
     }
 
 
