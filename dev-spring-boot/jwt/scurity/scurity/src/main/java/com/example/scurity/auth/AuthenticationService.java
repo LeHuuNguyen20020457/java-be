@@ -2,6 +2,7 @@ package com.example.scurity.auth;
 
 
 import com.example.scurity.config.JwtService;
+import com.example.scurity.loginHistory.LoginHistory;
 import com.example.scurity.token.Token;
 import com.example.scurity.token.TokenRepository;
 import com.example.scurity.token.TokenType;
@@ -11,15 +12,19 @@ import com.example.scurity.user.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Repository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
 
 
@@ -32,6 +37,10 @@ public class AuthenticationService {
     private final AuthenticationManager authenticationManager;
     private final TokenRepository tokenRepository;
 
+    @Autowired
+    private final HttpServletRequest request;
+
+    @Transactional
     public AuthenticationResponse registerUser(RegisterRequest request) {
         var user = User.builder()
                 .firstName(request.getFirstName())
@@ -40,6 +49,9 @@ public class AuthenticationService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(Role.USER)
                 .build();
+
+        user.add(insertLoginHistory());
+
         var savedUser = repository.save(user);
 
         var accessToken = jwtService.generateToken(user);
@@ -53,9 +65,12 @@ public class AuthenticationService {
                 .build();
     }
 
+
+    @Transactional
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
 
         UsernamePasswordAuthenticationToken userToken = new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword());
+
         authenticationManager.authenticate(
                 userToken
         );
@@ -63,11 +78,16 @@ public class AuthenticationService {
         var user = repository.findByEmail(request.getEmail())
                 .orElseThrow();
 
+
         var accessToken = jwtService.generateToken(user);
         var refreshToken = jwtService.generateRefreshToken(user);
 
+
         revokeAllUserTokens(user);
         saveUserToken(user, accessToken);
+
+        user.add(insertLoginHistory());
+        repository.save(user);
 
         return AuthenticationResponse.builder()
                 .accessToken(accessToken)
@@ -80,7 +100,6 @@ public class AuthenticationService {
         var validUserTokens = tokenRepository.findAllValidTokenByUser(user.getId());
 
         System.out.println("validUserTokens");
-        System.out.println(validUserTokens);
 
         if(validUserTokens.isEmpty()) return;
 
@@ -91,6 +110,7 @@ public class AuthenticationService {
 
         tokenRepository.saveAll(validUserTokens);
     }
+
 
     private void saveUserToken(User user, String jwtToken) {
         var token = Token.builder()
@@ -135,13 +155,40 @@ public class AuthenticationService {
 
                 new ObjectMapper().writeValue(response.getOutputStream(), authenticationResponse);
             }
-
-
-
         }
-
-
     }
 
+    public LoginHistory insertLoginHistory() {
+        var loginHistory = LoginHistory
+                .builder()
+                .loginTime(LocalDateTime.now())
+                .ipAddress(getIpAddress())
+                .userAgent(getUserAgent())
+                .build();
+        return loginHistory;
+    }
 
+    public String getIpAddress() {
+        String ipAddress = request.getHeader("X-Forwarded-For");
+        if (ipAddress == null || ipAddress.isEmpty() || "unknown".equalsIgnoreCase(ipAddress)) {
+            ipAddress = request.getHeader("Proxy-Client-IP");
+        }
+        if (ipAddress == null || ipAddress.isEmpty() || "unknown".equalsIgnoreCase(ipAddress)) {
+            ipAddress = request.getHeader("WL-Proxy-Client-IP");
+        }
+        if (ipAddress == null || ipAddress.isEmpty() || "unknown".equalsIgnoreCase(ipAddress)) {
+            ipAddress = request.getHeader("HTTP_CLIENT_IP");
+        }
+        if (ipAddress == null || ipAddress.isEmpty() || "unknown".equalsIgnoreCase(ipAddress)) {
+            ipAddress = request.getHeader("HTTP_X_FORWARDED_FOR");
+        }
+        if (ipAddress == null || ipAddress.isEmpty() || "unknown".equalsIgnoreCase(ipAddress)) {
+            ipAddress = request.getRemoteAddr();
+        }
+        return ipAddress;
+    }
+
+    public String getUserAgent() {
+        return request.getHeader("User-Agent");
+    }
 }
